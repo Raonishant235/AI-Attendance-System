@@ -77,9 +77,34 @@ def update_student(db: Session, student_id: int, student_data: StudentCreate):
     return student
 
 def delete_student(db: Session, student_id: int):
+    from pathlib import Path
+    from app.models.attendance import Attendance
+    from app.models.face_embedding import FaceEmbedding
+
     student = get_student_by_id(db, student_id)
 
-    db.delete(student)
-    db.commit()
+    photo_path = student.photo_path
+    try:
+        db.query(FaceEmbedding).filter(FaceEmbedding.student_id == student_id).delete(synchronize_session=False)
+        db.query(Attendance).filter(Attendance.student_id == student_id).delete(synchronize_session=False)
+        db.delete(student)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
-    return {"message" : "Student deleted successfully"}
+    photo_deleted = False
+    if photo_path:
+        path = Path(photo_path)
+
+        if path.exists() and path.is_file():
+            try:
+                path.unlink()
+                photo_deleted = True
+            except OSError:
+                pass
+    return {
+        "message" : "Student deleted successfully",
+        "student_id": student_id,
+        "photo_deleted": photo_deleted
+        }

@@ -11,31 +11,66 @@ router = APIRouter(prefix="/attendance", tags=["Attendance"])
 
 @router.post("/recognize")
 def recognize_and_mark_attendance(file: UploadFile = File(...), db: Session = Depends(get_db)):
+
+    MAX_FILE_SIZE = 5*1024*1024
     contents = file.file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty image file")
+    if len(contents)>MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Image file is too large. Maximum size is 5 MB.")
 
     image_array = np.frombuffer(contents, np.uint8)
     image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
 
     if image is None:
-        raise HTTPException(status_code=400, detail="Invalid image")
+        raise HTTPException(status_code=400, detail="Invalid image file")
+    
+    try:
+        faces = recognition_service.extract_all_faces(image)
+    except Exception as error:
+        print(f"Face detection error: {error}")
+        raise HTTPException(status_code=500, detail="Face detection failed")
 
-    faces = recognition_service.extract_all_faces(image)
     if not faces:
         raise HTTPException(status_code=400, detail="No faces detected")
 
     students = student_service.get_students(db)
+    if not students:
+        raise HTTPException(status_code=404, detail="No students are registered in the system.")
     recognized_students = []
+    recognized_student_ids = set()
 
     for detected_face in faces:
-        face = detected_face["face"]
-        embedding = recognition_service.generate_embedding(face)
+        face = detected_face.get("face")
+        if face is None:
+            continue
+        try:
+            embedding = recognition_service.generate_embedding(face)
+        except Exception as error:
+            print(f"Embedding generation error: {error}")
+            continue
 
-        student, distance = recognition_service.recognize_face(embedding, students, db)
+        if embedding is None:
+            continue
+        try:
+            student, distance = recognition_service.recognize_face(embedding, students, db)
+        except Exception as error:
+            print(f"Face recognition error: {error}")
+            continue
 
         if student is None:
             continue
 
-        attendance, created = (attendance_service.mark_attendance(db, student.id))
+        if student.id in recognized_student_ids:
+            continue
+        recognized_student_ids.add(student.id)
+
+        try:
+            attendance, created = attendance_service.mark_attendance(db, student.id)
+        except Exception as error:
+            db.rollback()
+            print(f"Attendance error for student {student.id}: {error}")
+            continue
 
         recognized_students.append({
             "student_id": student.id,
@@ -46,6 +81,7 @@ def recognize_and_mark_attendance(file: UploadFile = File(...), db: Session = De
         })
     return {
         "faces_detected": len(faces),
+        "recognized_count": len(recognized_students),
         "recognized_students": recognized_students
     }
 
