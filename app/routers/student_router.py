@@ -9,10 +9,12 @@ from fastapi.responses import Response, FileResponse
 from app.database import get_db
 from app.schemas.student import StudentCreate, StudentResponse
 from app.services import (student_service, face_service, recognition_service, embedding_service)
+from app.auth.security import get_current_user
+from app.auth.role_security import require_admin
 
-router = APIRouter(prefix="/students", tags=["Students"])
+router = APIRouter(prefix="/students", tags=["Students"], dependencies=[Depends(get_current_user)])
 
-@router.post("/", response_model=StudentResponse)
+@router.post("/", response_model=StudentResponse, dependencies=[Depends(require_admin)])
 def create_student(
     student : StudentCreate,
     db : Session = Depends(get_db)
@@ -20,27 +22,27 @@ def create_student(
     return student_service.create_student(db, student)
 
 
-@router.get("/", response_model=list[StudentResponse])
+@router.get("/", response_model=list[StudentResponse], dependencies=[Depends(get_current_user)])
 def get_students(db: Session = Depends(get_db)):
     return student_service.get_students(db)
 
 
-@router.get("/{student_id}", response_model=StudentResponse)
+@router.get("/{student_id}", response_model=StudentResponse, dependencies=[Depends(get_current_user)])
 def get_student(student_id: int, db: Session = Depends(get_db)):
     return student_service.get_student_by_id(db, student_id)
 
 
-@router.put("/{student_id}", response_model=StudentResponse)
+@router.put("/{student_id}", response_model=StudentResponse, dependencies=[Depends(require_admin)])
 def update_student(student_id: int, student_data: StudentCreate, db: Session = Depends(get_db)):
     return student_service.update_student(db, student_id, student_data)
 
 
-@router.delete("/{student_id}")
+@router.delete("/{student_id}", dependencies=[Depends(require_admin)])
 def delete_student(student_id: int, db: Session = Depends(get_db)):
     return student_service.delete_student(db, student_id)
 
 
-@router.post("/{student_id}/photo")
+@router.post("/{student_id}/photo", dependencies=[Depends(require_admin)])
 def upload_student_photo(student_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     student = student_service.get_student_by_id(db, student_id)
 
@@ -74,7 +76,7 @@ def upload_student_photo(student_id: int, file: UploadFile = File(...), db: Sess
         "message": "Student photo uploaded successfully",
         "photo_path": student.photo_path}
 
-@router.get("/{student_id}/photo")
+@router.get("/{student_id}/photo", dependencies=[Depends(get_current_user)])
 def get_student_photo(student_id: int, db: Session = Depends(get_db)):
     student = student_service.get_student_by_id(db, student_id)
     if not student.photo_path:
@@ -88,7 +90,7 @@ def get_student_photo(student_id: int, db: Session = Depends(get_db)):
     return FileResponse(path = photo_path, media_type="image/jpeg")
 
 
-@router.post("/{student_id}/detect-face")
+@router.post("/{student_id}/detect-face", dependencies=[Depends(require_admin)])
 def detect_student_face(student_id: int, db: Session = Depends(get_db)):
     student = student_service.get_student_by_id(db, student_id)
 
@@ -109,7 +111,7 @@ def detect_student_face(student_id: int, db: Session = Depends(get_db)):
     return Response(content=encoded_image.tobytes(), media_type="image/jpeg", headers={"X-Face-Count": str(face_count)})
 
 
-@router.post("/{student_id}/generate-embedding")
+@router.post("/{student_id}/generate-embedding", dependencies=[Depends(require_admin)])
 def generate_student_embedding(student_id: int, db: Session = Depends(get_db)):
     student = student_service.get_student_by_id(db, student_id)
 
@@ -123,7 +125,7 @@ def generate_student_embedding(student_id: int, db: Session = Depends(get_db)):
 
     return {"message": "Face embedding generated and stored successfully"}
 
-@router.get("/{student_id}/face-status")
+@router.get("/{student_id}/face-status", dependencies=[Depends(get_current_user)])
 def get_face_status(student_id: int, db: Session = Depends(get_db)):
     student = student_service.get_student_by_id(db, student_id)
 
@@ -144,7 +146,7 @@ def get_face_status(student_id: int, db: Session = Depends(get_db)):
         "embedding_count": len(embeddings)
     }
 
-@router.post("/{student_id}/face-sample")
+@router.post("/{student_id}/face-sample", dependencies=[Depends(require_admin)])
 def add_face_sample(student_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
     student = student_service.get_student_by_id(db, student_id)
 
@@ -187,7 +189,7 @@ def add_face_sample(student_id: int, file: UploadFile = File(...), db: Session =
         "validation": {"faces_detected": 1, "face_width": face_width, "face_height": face_height}
     }
 
-@router.get("/{student_id}/face-samples")
+@router.get("/{student_id}/face-samples", dependencies=[Depends(get_current_user)])
 def get_face_samples(student_id: int, db: Session = Depends(get_db)):
     student_service.get_student_by_id(db, student_id)
 
@@ -198,7 +200,7 @@ def get_face_samples(student_id: int, db: Session = Depends(get_db)):
         "samples": [{"id": embedding.id} for embedding in embeddings]
     }
 
-@router.delete("/{student_id}/face-samples/{embedding_id}")
+@router.delete("/{student_id}/face-samples/{embedding_id}", dependencies=[Depends(require_admin)])
 def delete_face_sample(student_id: int, embedding_id: int, db: Session = Depends(get_db)):
     student_service.get_student_by_id(db, student_id)
 
@@ -220,7 +222,7 @@ def delete_face_sample(student_id: int, embedding_id: int, db: Session = Depends
         "remaining_samples": remaining_count
     }
 
-@router.delete("/{student_id}/face-samples")
+@router.delete("/{student_id}/face-samples", dependencies=[Depends(require_admin)])
 def delete_all_face_samples(student_id: int, db: Session = Depends(get_db)):
     student_service.get_student_by_id(db, student_id)
 
@@ -238,7 +240,7 @@ def delete_all_face_samples(student_id: int, db: Session = Depends(get_db)):
         "remaining_samples": 0
     }
 
-@router.post("/recognize-test")
+@router.post("/recognize-test", dependencies=[Depends(get_current_user)])
 def recognize_test(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)

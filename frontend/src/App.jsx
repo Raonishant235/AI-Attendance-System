@@ -1,8 +1,156 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
+const API_BASE_URL = 'http://127.0.0.1:8000'
+
+const apiFetch = async (url, options = {}) => {
+  const token = localStorage.getItem('access_token')
+  const headers = new Headers(options.headers || {})
+
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  const response = await window.fetch(url, {
+    ...options,
+    headers
+  })
+
+  if (response.status === 401 && token) {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('auth_user')
+    window.dispatchEvent(new Event('auth-expired'))
+  }
+
+  return response
+}
+
+function LoginScreen({ onLogin }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setLoading(true)
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        body: JSON.stringify({ username, password })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Invalid username or password.')
+      }
+
+      localStorage.setItem('access_token', data.access_token)
+
+      const payloadPart = data.access_token.split('.')[1]
+      const normalizedPayload = payloadPart.replace(/-/g, '+').replace(/_/g, '/')
+      const paddedPayload = normalizedPayload.padEnd(
+        normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+        '='
+      )
+      const tokenPayload = JSON.parse(atob(paddedPayload))
+      const user = {
+        id: Number(tokenPayload.sub),
+        username: tokenPayload.username || username,
+        role: tokenPayload.role || 'admin'
+      }
+
+      localStorage.setItem('auth_user', JSON.stringify(user))
+      onLogin(user)
+    } catch (loginError) {
+      console.error('Login error:', loginError)
+      setError(loginError.message || 'Unable to log in.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="auth-page">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <div className="auth-logo">AI</div>
+          <div>
+            <strong>Attendance</strong>
+            <span>AI System</span>
+          </div>
+        </div>
+
+        <div className="auth-heading">
+          <span className="auth-eyebrow">SECURE ACCESS</span>
+          <h1>Welcome back</h1>
+          <p>Sign in to access the AI attendance control center.</p>
+        </div>
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <div className="auth-field">
+            <label htmlFor="login-username">Username</label>
+            <input
+              id="login-username"
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="Enter your username"
+              autoComplete="username"
+              required
+            />
+          </div>
+
+          <div className="auth-field">
+            <label htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+
+          {error && <div className="auth-error">{error}</div>}
+
+          <button type="submit" className="auth-submit" disabled={loading}>
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
+
+        <div className="auth-footer">
+          <span>Protected AI Attendance System</span>
+          <span>JWT secured</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [page, setPage] = useState('dashboard')
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    () => Boolean(localStorage.getItem('access_token'))
+  )
+  const [authUser, setAuthUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('auth_user') || 'null')
+    } catch {
+      return null
+    }
+  })
+  const isAdmin = authUser?.role?.toLowerCase() === "admin"
+  const [studentPhotoUrl, setStudentPhotoUrl] = useState('')
 
   const [statistics, setStatistics] = useState(null)
   const [attendance, setAttendance] = useState([])
@@ -82,11 +230,71 @@ function App() {
   const faceSampleCanvasRef = useRef(null)
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return
+    }
+
     fetchStatistics()
     fetchAttendance()
     fetchStudents()
     fetchReport(reportDate)
+  }, [isAuthenticated])
+
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      setIsAuthenticated(false)
+      setAuthUser(null)
+      setPage('dashboard')
+      stopCamera()
+      stopFaceSampleCamera()
+    }
+
+    window.addEventListener('auth-expired', handleAuthExpired)
+
+    return () => {
+      window.removeEventListener('auth-expired', handleAuthExpired)
+    }
   }, [])
+
+  useEffect(() => {
+    if (!selectedStudent || !isAuthenticated) {
+      setStudentPhotoUrl('')
+      return
+    }
+
+    let cancelled = false
+    let objectUrl = null
+
+    const loadStudentPhoto = async () => {
+      try {
+        const response = await apiFetch(
+          `${API_BASE_URL}/students/${selectedStudent.id}/photo`
+        )
+
+        if (!response.ok) {
+          return
+        }
+
+        const blob = await response.blob()
+        objectUrl = URL.createObjectURL(blob)
+
+        if (!cancelled) {
+          setStudentPhotoUrl(objectUrl)
+        }
+      } catch (error) {
+        console.error('Error loading student photo:', error)
+      }
+    }
+
+    loadStudentPhoto()
+
+    return () => {
+      cancelled = true
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+  }, [selectedStudent, isAuthenticated])
 
   useEffect(() => {
     return () => {
@@ -184,7 +392,7 @@ function App() {
   }
 
   const fetchStatistics = () => {
-    fetch('http://127.0.0.1:8000/attendance/statistics')
+    apiFetch('http://127.0.0.1:8000/attendance/statistics')
       .then((response) => response.json())
       .then((data) => {
         setStatistics(data)
@@ -195,7 +403,7 @@ function App() {
   }
 
   const fetchAttendance = () => {
-    fetch('http://127.0.0.1:8000/attendance/today')
+    apiFetch('http://127.0.0.1:8000/attendance/today')
       .then((response) => response.json())
       .then((data) => {
         setAttendance(data)
@@ -206,7 +414,7 @@ function App() {
   }
 
   const fetchAllAttendance = () => {
-    fetch('http://127.0.0.1:8000/attendance/')
+    apiFetch('http://127.0.0.1:8000/attendance/')
       .then((response) => response.json())
       .then((data) => {
         setAttendance(data)
@@ -217,7 +425,7 @@ function App() {
   }
 
   const fetchAttendanceByDate = (date) => {
-    fetch(`http://127.0.0.1:8000/attendance/date/${date}`)
+    apiFetch(`http://127.0.0.1:8000/attendance/date/${date}`)
       .then((response) => response.json())
       .then((data) => {
         setAttendance(data)
@@ -228,7 +436,7 @@ function App() {
   }
 
   const fetchAttendanceByStudent = (studentId) => {
-    fetch(`http://127.0.0.1:8000/attendance/student/${studentId}`)
+    apiFetch(`http://127.0.0.1:8000/attendance/student/${studentId}`)
       .then((response) => response.json())
       .then((data) => {
         setAttendance(data)
@@ -239,7 +447,7 @@ function App() {
   }
 
   const fetchStudents = () => {
-    fetch('http://127.0.0.1:8000/students/')
+    apiFetch('http://127.0.0.1:8000/students/')
       .then((response) => response.json())
       .then((data) => {
         setStudents(data)
@@ -280,10 +488,10 @@ function App() {
     try {
       const [studentResponse, statusResponse, attendanceResponse, samplesResponse] =
         await Promise.all([
-          fetch(`http://127.0.0.1:8000/students/${studentId}`),
-          fetch(`http://127.0.0.1:8000/students/${studentId}/face-status`),
-          fetch(`http://127.0.0.1:8000/attendance/student/${studentId}`),
-          fetch(`http://127.0.0.1:8000/students/${studentId}/face-samples`)
+          apiFetch(`http://127.0.0.1:8000/students/${studentId}`),
+          apiFetch(`http://127.0.0.1:8000/students/${studentId}/face-status`),
+          apiFetch(`http://127.0.0.1:8000/attendance/student/${studentId}`),
+          apiFetch(`http://127.0.0.1:8000/students/${studentId}/face-samples`)
         ])
 
       const studentData = await studentResponse.json()
@@ -348,7 +556,7 @@ function App() {
   setLoadingFaceSamples(true)
 
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `http://127.0.0.1:8000/students/${studentId}/face-samples`
     )
 
@@ -397,7 +605,7 @@ const performDeleteFaceSample = async (embeddingId) => {
   setEmbeddingError('')
 
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `http://127.0.0.1:8000/students/${selectedStudent.id}/face-samples/${embeddingId}`,
       {
         method: 'DELETE'
@@ -459,7 +667,7 @@ const performDeleteAllFaceSamples = async () => {
   setEmbeddingError('')
 
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `http://127.0.0.1:8000/students/${selectedStudent.id}/face-samples`,
       {
         method: 'DELETE'
@@ -583,7 +791,7 @@ const performDeleteAllFaceSamples = async () => {
       formData.append('file', blob, 'face-sample.jpg')
 
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `http://127.0.0.1:8000/students/${selectedStudent.id}/face-sample`,
           {
             method: 'POST',
@@ -621,7 +829,7 @@ const performDeleteAllFaceSamples = async () => {
     setEmbeddingError('')
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `http://127.0.0.1:8000/students/${selectedStudent.id}/generate-embedding`,
         {
           method: 'POST'
@@ -652,7 +860,7 @@ const performDeleteAllFaceSamples = async () => {
   }
 
   const fetchReport = (date) => {
-    fetch(`http://127.0.0.1:8000/attendance/date/${date}`)
+    apiFetch(`http://127.0.0.1:8000/attendance/date/${date}`)
       .then((response) => response.json())
       .then((data) => {
         setReportAttendance(data)
@@ -776,7 +984,7 @@ const performDeleteAllFaceSamples = async () => {
       formData.append('file', blob, 'frame.jpg')
 
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           'http://127.0.0.1:8000/attendance/recognize',
           {
             method: 'POST',
@@ -875,7 +1083,7 @@ const performDeleteAllFaceSamples = async () => {
     setUpdatingStudent(true)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `http://127.0.0.1:8000/students/${editingStudent.id}`,
         {
           method: 'PUT',
@@ -941,7 +1149,7 @@ const performDeleteAllFaceSamples = async () => {
       const formData = new FormData()
       formData.append('file', studentForm.photo)
 
-      const response = await fetch(
+      const response = await apiFetch(
         `http://127.0.0.1:8000/students/${editingStudent.id}/photo`,
         {
           method: 'POST',
@@ -1000,7 +1208,7 @@ const performDeleteAllFaceSamples = async () => {
     setDeletingStudent(true)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `http://127.0.0.1:8000/students/${selectedStudent.id}`,
         {
           method: 'DELETE'
@@ -1046,7 +1254,7 @@ const performDeleteAllFaceSamples = async () => {
     setAddingStudent(true)
 
     try {
-      const studentResponse = await fetch(
+      const studentResponse = await apiFetch(
         'http://127.0.0.1:8000/students/',
         {
           method: 'POST',
@@ -1076,7 +1284,7 @@ const performDeleteAllFaceSamples = async () => {
       const formData = new FormData()
       formData.append('file', studentForm.photo)
 
-      const photoResponse = await fetch(
+      const photoResponse = await apiFetch(
         `http://127.0.0.1:8000/students/${studentId}/photo`,
         {
           method: 'POST',
@@ -1122,6 +1330,27 @@ const performDeleteAllFaceSamples = async () => {
     }
 
     setAddingStudent(false)
+  }
+
+  const handleLogout = () => {
+    stopCamera()
+    stopFaceSampleCamera()
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('auth_user')
+    setAuthUser(null)
+    setIsAuthenticated(false)
+    setSelectedStudent(null)
+    setEditingStudent(null)
+    setStudentPhotoUrl('')
+    setPage('dashboard')
+  }
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={(user) => {
+      setAuthUser(user)
+      setIsAuthenticated(true)
+      setPage('dashboard')
+    }} />
   }
 
   return (
@@ -1217,16 +1446,24 @@ const performDeleteAllFaceSamples = async () => {
             </div>
           </div>
 
-          <div className="sidebar-divider sidebar-profile-divider" />
+        </div>
 
-          <div className="sidebar-profile">
-            <div className="sidebar-avatar">NY</div>
-            <div className="sidebar-profile-copy">
-              <strong>Nishant Yadav</strong>
-              <span>Administrator</span>
-            </div>
-            <button className="sidebar-profile-menu" type="button" aria-label="Profile options">⋮</button>
+        <div className="sidebar-profile">
+          <div className="sidebar-avatar">{(authUser?.username || 'A').slice(0, 2).toUpperCase()}</div>
+          <div className="sidebar-profile-copy">
+            <strong>{authUser?.username || 'Administrator'}</strong>
+            <span>{authUser?.role === 'admin' ? 'Administrator' : 'User'}</span>
           </div>
+          <button
+            className="sidebar-logout-button"
+            type="button"
+            onClick={handleLogout}
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            <span className="sidebar-logout-icon">↪</span>
+            <span>Sign out</span>
+          </button>
         </div>
 
       </aside>
@@ -1334,19 +1571,15 @@ const performDeleteAllFaceSamples = async () => {
                 <div className="stat-mark">!</div>
               </div>
 
-              <div className="stat-card stat-card-purple">
-                <div className="stat-icon">%</div>
-                <div className="stat-main">
-                  <p>Attendance Rate</p>
-                  <h2>{statistics?.["Attendance percentage"] ?? 0}%</h2>
-                  <span className="stat-caption">Today's overall rate</span>
-                </div>
+              <div className="stat-card stat-card-purple attendance-rate-card">
+                <div className="attendance-rate-title">Attendance Rate</div>
                 <div
                   className="attendance-ring-small"
                   style={{ '--attendance': statistics?.["Attendance percentage"] ?? 0 }}
                 >
                   <span>{statistics?.["Attendance percentage"] ?? 0}%</span>
                 </div>
+                <span className="attendance-rate-caption">Today's overall rate</span>
               </div>
             </section>
 
@@ -1487,11 +1720,13 @@ const performDeleteAllFaceSamples = async () => {
                     <div><strong>Live Recognition</strong><small>Scan faces now</small></div>
                     <b>→</b>
                   </button>
-                  <button onClick={() => { setPage('students'); setShowAddStudent(true) }}>
-                    <span>＋</span>
-                    <div><strong>Add Student</strong><small>Register a new student</small></div>
-                    <b>→</b>
-                  </button>
+                  {isAdmin && (
+  <button onClick={() => { setPage('students'); setShowAddStudent(true) }}>
+    <span>＋</span>
+    <div><strong>Add Student</strong><small>Register a new student</small></div>
+    <b>→</b>
+  </button>
+)}
                   <button onClick={() => setPage('attendance')}>
                     <span>▣</span>
                     <div><strong>Attendance</strong><small>Review today's records</small></div>
@@ -2193,16 +2428,18 @@ const performDeleteAllFaceSamples = async () => {
                     </div>
                   </div>
 
-                  <button
-                    className="primary-button"
-                    onClick={() => {
-                      setShowAddStudent(!showAddStudent)
-                      setStudentMessage('')
-                      setStudentError('')
-                    }}
-                  >
-                    {showAddStudent ? 'Close Form' : '+ Add Student'}
-                  </button>
+                  {isAdmin && (
+  <button
+    className="primary-button"
+    onClick={() => {
+      setShowAddStudent(!showAddStudent)
+      setStudentMessage('')
+      setStudentError('')
+    }}
+  >
+    {showAddStudent ? 'Close Form' : '+ Add Student'}
+  </button>
+)}
                 </div>
 
                 {showAddStudent && (
@@ -2398,7 +2635,7 @@ const performDeleteAllFaceSamples = async () => {
                     <div className="student-details-content student-details-content-modern">
                       <div className="student-photo-section student-photo-modern">
                         <img
-                          src={`http://127.0.0.1:8000/students/${selectedStudent.id}/photo`}
+                          src={studentPhotoUrl}
                           alt={selectedStudent.name}
                           className="student-details-photo"
                         />
@@ -2795,7 +3032,7 @@ const performDeleteAllFaceSamples = async () => {
                     <div className="match-result">
                       <div className="match-avatar">✓</div>
                       <span className="match-label">STUDENT RECOGNIZED</span>
-                      <h3 style={{ color: "#172033", fontWeight: 800 }}>{recognitionResult.name}</h3>
+                      <h2>{recognitionResult.name}</h2>
                       <div className="match-divider" />
                       <div className="match-metrics">
                         <div><span>Distance</span><strong>{recognitionResult.distance.toFixed(3)}</strong></div>

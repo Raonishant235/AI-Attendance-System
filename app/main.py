@@ -5,10 +5,12 @@ from app.database import Base, engine
 
 from app.routers import student_router
 from app.routers import attendance_router
+from app.routers import auth_router
 
 from app.models.student import Student
 from app.models.attendance import Attendance
 from app.models.face_embedding import FaceEmbedding
+from app.models.user import User
 
 Base.metadata.create_all(bind=engine)
 
@@ -22,7 +24,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 
 app.include_router(student_router.router)
 app.include_router(attendance_router.router)
+app.include_router(auth_router.router)
 
 @app.get("/")
 def home():
-    return {"message": "Welcome to AI Attendance System"}
+    return {"message": "Welcome to AI-Powered Attendance System"}

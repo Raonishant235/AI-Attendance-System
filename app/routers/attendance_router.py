@@ -6,10 +6,12 @@ import numpy as np
 from app.database import get_db
 from app.services import (attendance_service, recognition_service, student_service)
 from app.schemas.attendance import AttendanceResponse
+from app.auth.security import get_current_user
+from app.auth.role_security import require_admin
 
-router = APIRouter(prefix="/attendance", tags=["Attendance"])
+router = APIRouter(prefix="/attendance", tags=["Attendance"], dependencies=[Depends(get_current_user)])
 
-@router.post("/recognize")
+@router.post("/recognize", dependencies=[Depends(get_current_user)])
 def recognize_and_mark_attendance(file: UploadFile = File(...), db: Session = Depends(get_db)):
 
     MAX_FILE_SIZE = 5*1024*1024
@@ -85,11 +87,11 @@ def recognize_and_mark_attendance(file: UploadFile = File(...), db: Session = De
         "recognized_students": recognized_students
     }
 
-@router.get("/statistics")
+@router.get("/statistics", dependencies=[Depends(get_current_user)])
 def get_attendance_statistics(db: Session = Depends(get_db)):
     return attendance_service.get_today_statistics(db)
 
-@router.post("/{student_id}")
+@router.post("/{student_id}", dependencies=[Depends(require_admin)])
 def mark_student_attendance(student_id: int, db: Session = Depends(get_db)):
     attendance, created = attendance_service.mark_attendance(db, student_id)
 
@@ -102,7 +104,7 @@ def mark_student_attendance(student_id: int, db: Session = Depends(get_db)):
         "new_attendance": created
     }
 
-@router.get("/", response_model=list[AttendanceResponse])
+@router.get("/", response_model=list[AttendanceResponse], dependencies=[Depends(get_current_user)])
 def get_all_attendance(db: Session = Depends(get_db)):
     records = attendance_service.get_all_attendance(db)
     return [
@@ -117,7 +119,7 @@ def get_all_attendance(db: Session = Depends(get_db)):
         for attendance, student_name in records
     ]
 
-@router.get("/today", response_model=list[AttendanceResponse])
+@router.get("/today", response_model=list[AttendanceResponse], dependencies=[Depends(get_current_user)])
 def get_today_attendance(db: Session = Depends(get_db)):
     records = attendance_service.get_today_attendance(db)
     return [
@@ -132,7 +134,7 @@ def get_today_attendance(db: Session = Depends(get_db)):
         for attendance, student_name in records
     ]
 
-@router.get("/student/{student_id}", response_model=list[AttendanceResponse])
+@router.get("/student/{student_id}", response_model=list[AttendanceResponse], dependencies=[Depends(get_current_user)])
 def get_student_attendance(student_id: int, db: Session = Depends(get_db)):
     records = attendance_service.get_student_attendance(db, student_id)
     return [
@@ -147,7 +149,7 @@ def get_student_attendance(student_id: int, db: Session = Depends(get_db)):
         for attendance, student_name in records
     ]
 
-@router.get("/date/{date}", response_model=list[AttendanceResponse])
+@router.get("/date/{date}", response_model=list[AttendanceResponse], dependencies=[Depends(get_current_user)])
 def get_attendance_by_date(date: str, db: Session = Depends(get_db)):
     records = attendance_service.get_attendance_by_date(db, date)
     return [
