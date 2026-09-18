@@ -446,6 +446,39 @@ function App() {
       })
   }
 
+  const markManualAttendance = async () => {
+    if (!selectedStudent) return
+
+    try {
+      const response = await apiFetch(
+        `http://127.0.0.1:8000/attendance/${selectedStudent.id}`,
+        {
+          method: 'POST'
+        }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || 'Failed to mark attendance.'
+        )
+      }
+
+      showNotification(
+        'success',
+        data.message || `Attendance marked for ${selectedStudent.name}.`
+      )
+
+      await viewStudent(selectedStudent.id)
+      fetchStatistics()
+      fetchAttendance()
+    } catch (error) {
+      console.error('Error marking manual attendance:', error)
+      showNotification('error', error.message)
+    }
+  }
+
   const fetchStudents = () => {
     apiFetch('http://127.0.0.1:8000/students/')
       .then((response) => response.json())
@@ -2610,12 +2643,16 @@ const performDeleteAllFaceSamples = async () => {
                       </div>
 
                       <div className="student-details-actions">
+                        {isAdmin && (
                         <button className="primary-button" onClick={startEditingStudent} disabled={loadingStudent}>
                           Edit Student
                         </button>
+                        )}
+                        {(isAdmin &&
                         <button className="secondary-button" onClick={deleteStudent} disabled={deletingStudent || loadingStudent}>
                           {deletingStudent ? 'Deleting...' : 'Delete Student'}
                         </button>
+                        )}
                         <button
                           className="secondary-button"
                           onClick={() => {
@@ -2700,6 +2737,7 @@ const performDeleteAllFaceSamples = async () => {
                                 disabled={updatingStudent || updatingPhoto}
                               />
                             </div>
+                            {isAdmin && (
                             <button
                               type="button"
                               className="secondary-button"
@@ -2708,6 +2746,7 @@ const performDeleteAllFaceSamples = async () => {
                             >
                               {updatingPhoto ? 'Uploading Photo...' : 'Update Photo'}
                             </button>
+                            )}
                           </div>
 
                           <div className="student-details-actions">
@@ -2752,14 +2791,18 @@ const performDeleteAllFaceSamples = async () => {
                       </div>
 
                       <div className="face-camera-modern">
+                        {isAdmin && (
                         <div className="face-position-guide">
                           <strong>Next sample:</strong> {sampleInstruction}
                         </div>
+                        )}
 
                         {!faceSampleCameraRunning ? (
+                          (isAdmin &&
                           <button className="primary-button" onClick={startFaceSampleCamera}>
                             Start Sample Camera
                           </button>
+                          )
                         ) : (
                           <>
                             <video
@@ -2771,6 +2814,7 @@ const performDeleteAllFaceSamples = async () => {
                               className="live-camera-video face-sample-video-modern"
                             />
                             <div className="face-sample-actions-modern">
+                              {isAdmin && (
                               <button
                                 className="primary-button"
                                 onClick={captureFaceSample}
@@ -2782,9 +2826,12 @@ const performDeleteAllFaceSamples = async () => {
                                     ? 'Capture Face Sample'
                                     : 'Starting Camera...'}
                               </button>
+                              )}
+                              {isAdmin && (
                               <button className="secondary-button" onClick={stopFaceSampleCamera} disabled={capturingSample}>
                                 Stop Sample Camera
                               </button>
+                              )}
                             </div>
                             <canvas ref={faceSampleCanvasRef} style={{ display: 'none' }} />
                           </>
@@ -2792,9 +2839,11 @@ const performDeleteAllFaceSamples = async () => {
                       </div>
 
                       {embeddingCount >= 5 && (
+                        (isAdmin &&
                         <div className="student-success" style={{ marginTop: '14px' }}>
                           ✓ Five recommended samples are registered. Additional samples can still be captured.
                         </div>
+                        )
                       )}
 
                       <div style={{ marginTop: '18px' }}>
@@ -2830,6 +2879,7 @@ const performDeleteAllFaceSamples = async () => {
                                     <strong>Sample {index + 1}</strong>
                                     <span>ID: {sample.id}</span>
                                   </div>
+                                  {isAdmin && (
                                   <button
                                     className="secondary-button"
                                     onClick={() => deleteFaceSample(sample.id)}
@@ -2837,17 +2887,21 @@ const performDeleteAllFaceSamples = async () => {
                                   >
                                     Delete
                                   </button>
+                                  )}
                                 </div>
                               ))}
                             </div>
+                            {isAdmin && (
                             <button className="secondary-button" onClick={deleteAllFaceSamples} disabled={deletingFaceSample}>
                               {deletingFaceSample ? 'Deleting...' : 'Clear All Face Samples'}
                             </button>
+                            )}
                           </>
                         )}
                       </div>
 
                       <div style={{ marginTop: '18px' }}>
+                        {isAdmin && (
                         <button className="secondary-button" onClick={generateEmbedding} disabled={generatingEmbedding}>
                           {generatingEmbedding
                             ? 'Generating Embedding...'
@@ -2855,6 +2909,7 @@ const performDeleteAllFaceSamples = async () => {
                               ? 'Generate From Uploaded Photo Again'
                               : 'Generate Face Embedding'}
                         </button>
+                        )}
                       </div>
 
                       {embeddingMessage && <div className="student-success" style={{ marginTop: '12px' }}>{embeddingMessage}</div>}
@@ -2862,7 +2917,18 @@ const performDeleteAllFaceSamples = async () => {
                     </div>
 
                     <div className="student-attendance-section student-attendance-modern">
-                      <h3>Attendance Summary</h3>
+                      <div className="attendance-summary-header">
+                        <h3>Attendance Summary</h3>
+
+                        {isAdmin && (
+                          <button
+                            className="primary-button"
+                            onClick={markManualAttendance}
+                          >
+                            Mark Present
+                          </button>
+                        )}
+                      </div>
 
                       <div className="student-attendance-stats-modern">
                         <div className="attendance-mini-card-modern">

@@ -5,6 +5,11 @@ from app.models.attendance import Attendance
 from app.models.student import Student
 
 def mark_attendance(db: Session, student_id: int):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if student is None:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+    
     today = datetime.now().strftime("%Y-%m-%d")
 
     existing = db.query(Attendance).filter(Attendance.student_id == student_id, Attendance.date == today).first()
@@ -45,8 +50,8 @@ def get_today_statistics(db: Session):
     today = datetime.now().strftime("%Y-%m-%d")
 
     total_students = db.query(Student).count()
-    present_today = db.query(Attendance).filter(Attendance.date == today, Attendance.status == "Present").count()
-    absent_today = total_students - present_today
+    present_today = (db.query(Attendance).join(Student, Attendance.student_id == Student.id).filter(Attendance.date == today, Attendance.status == "Present").count())
+    absent_today = max(total_students - present_today, 0)
 
     if total_students > 0:
         attendance_percentage = (present_today / total_students)*100
