@@ -1,4 +1,4 @@
-# AI Attendance System
+# AI-Powered Attendance System
 
 An attendance management application that combines a React interface with a FastAPI backend and face recognition. It supports day-to-day student and attendance management while using facial embeddings to identify registered students and record attendance automatically.
 
@@ -219,7 +219,7 @@ This project was created as a portfolio-focused exercise in combining full-stack
 
 ## Author
 
-**Nishant**
+**Nishant Yadav**
 
 If you found this project useful or have feedback, feel free to connect through the links on the GitHub profile hosting this repository.
 
